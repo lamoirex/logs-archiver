@@ -1,1 +1,20 @@
+# Монтирует /LOGS при загрузке системы через mount_logs.sh
+[Unit]
+Description=Mount /LOGS partition for IS component logs
+Documentation=file:///opt/scripts/mount_logs.sh
+# Ждём, пока поднимутся локальные диски, иначе /opt/logs.img может быть ещё недоступен
+After=local-fs.target
+RequiresMountsFor=/opt
+# Архиватор без /LOGS запускать бессмысленно, так что мы идём первыми
+Before=archive-old-logs.service
 
+[Service]
+# Скрипт отработал и вышел, а сервис остаётся active, то есть видно, что монтирование было
+Type=oneshot
+RemainAfterExit=yes
+Environment=IMG_FILE=/opt/logs.img
+Environment=MOUNT_POINT=/LOGS
+ExecStart=/opt/scripts/mount_logs.sh
+
+[Install]
+WantedBy=multi-user.target
