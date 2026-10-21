@@ -33,11 +33,20 @@ if [ ! -d "$LOGS_DIR" ]; then
     exit 1
 fi
 
+# Если раздел не смонтирован, то /LOGS это просто пустая папка на системном диске.
+# Проверять её бессмысленно, лучше сразу сообщить об ошибке.
+if ! mountpoint -q "$LOGS_DIR"; then
+    echo "Ошибка: $LOGS_DIR не смонтирован, раздел для логов не подключён"
+    exit 1
+fi
+
 # Порог должен быть целым числом от 1 до 100
 if ! echo "$THRESHOLD" | grep -q '^[0-9][0-9]*$'; then
     echo "Ошибка: порог должен быть целым числом, а получено: $THRESHOLD"
     exit 1
 fi
+# Убираем ведущие нули: 090 -> 90, иначе bash считает число восьмеричным
+THRESHOLD=$((10#$THRESHOLD))
 if [ "$THRESHOLD" -lt 1 ] || [ "$THRESHOLD" -gt 100 ]; then
     echo "Ошибка: порог должен быть от 1 до 100, а получено: $THRESHOLD"
     exit 1
@@ -51,14 +60,18 @@ echo "=== Проверка $LOGS_DIR, $(date '+%Y-%m-%d %H:%M:%S') ==="
 # Вторая строка вывода: устройство, размер, занято, свободно, процент, точка монтирования
 df_line=$(df -P -k "$LOGS_DIR" | tail -n 1)
 # tr -s ' ' склеивает подряд идущие пробелы в один, чтобы cut мог взять нужную колонку
-total_kb=$(echo "$df_line" | tr -s ' ' | cut -d ' ' -f 2)
 used_kb=$(echo "$df_line" | tr -s ' ' | cut -d ' ' -f 3)
+free_kb=$(echo "$df_line" | tr -s ' ' | cut -d ' ' -f 4)
+
+# ext4 оставляет около 5% места только для root, обычным программам оно недоступно.
+# Поэтому считаем размер как "занято + свободно", ровно так же считает процент df.
+total_kb=$((used_kb + free_kb))
 
 limit_kb=$((total_kb * THRESHOLD / 100))
 folder_limit_kb=$((limit_kb / 3))
 used_percent=$((used_kb * 100 / total_kb))
 
-echo "Раздел: размер $total_kb КБ, занято $used_kb КБ ($used_percent%)"
+echo "Раздел: доступно $total_kb КБ, занято $used_kb КБ ($used_percent%)"
 echo "Общий лимит: $limit_kb КБ ($THRESHOLD%), лимит одной папки: $folder_limit_kb КБ"
 
 if [ "$used_kb" -le "$limit_kb" ]; then
@@ -123,7 +136,10 @@ archive_folder() {
     # -C перед упаковкой зайти в папку, чтобы в архиве лежали только имена файлов
     tar -czf "$dir/archive/$archive_name" -C "$dir" $files_to_archive
     if [ $? -ne 0 ]; then
-        echo "  $component: ошибка tar, файлы не удалены"
+        # Недописанный архив никому не нужен и только занимает место
+        rm -f "$dir/archive/$archive_name"
+        echo "  $component: ошибка tar, битый архив удалён, файлы не тронуты"
+        had_error=1
         return
     fi
 
@@ -141,6 +157,9 @@ archive_folder() {
 
 # ---------- 4. Проверяем каждую папку ----------
 
+# Станет 1, если хотя бы в одной папке архивация не удалась
+had_error=0
+
 for component in $COMPONENTS; do
     dir="$LOGS_DIR/$component"
     if [ ! -d "$dir" ]; then
@@ -157,4 +176,8 @@ for component in $COMPONENTS; do
     fi
 done
 
+# Код 1 нужен, чтобы cron и systemd узнали об ошибке
+if [ "$had_error" -eq 1 ]; then
+    exit 1
+fi
 exit 0
