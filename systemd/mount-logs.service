@@ -1,1 +1,11 @@
+[Unit]
+Description=Mount /LOGS partition
+After=local-fs.target
 
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/mount_logs.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
