@@ -1,0 +1,12 @@
+# Будильник для архиватора: первый раз через минуту после загрузки, дальше каждые 2 минуты
+[Unit]
+Description=Run archive-old-logs.service every 2 minutes
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=2min
+AccuracySec=10s
+Unit=archive-old-logs.service
+
+[Install]
+WantedBy=timers.target

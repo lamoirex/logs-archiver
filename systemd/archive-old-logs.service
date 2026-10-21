@@ -1,0 +1,10 @@
+# Один прогон архиватора, а запускает его таймер
+[Unit]
+Description=Archive old logs in /LOGS when partition usage exceeds threshold
+# Без смонтированного /LOGS архивировать нечего, так что ждём монтирование
+Requires=mount-logs.service
+After=mount-logs.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/scripts/archive_old_logs.sh
