@@ -1,6 +1,6 @@
 #!/bin/bash
 
-SCRIPT="$(dirname "$0")/../scripts/archive_logs.sh"
+SCRIPT="$(dirname "$0")/archive_logs.sh"
 TEST_ROOT="/tmp/archive_logs_test"
 IMAGE="$TEST_ROOT/disk.img"
 LOGS="$TEST_ROOT/LOGS"
@@ -13,8 +13,6 @@ SYSTEM="system_event_handler_service"
 tests_total=0
 tests_passed=0
 errors=0
-
-# ---------- Подготовка раздела ----------
 
 if [ "$(id -u)" -ne 0 ]; then
     echo "Тестам нужен root, запустите: sudo bash $0"
@@ -33,24 +31,22 @@ rm -rf "$TEST_ROOT"
 mkdir -p "$LOGS"
 
 dd if=/dev/zero of="$IMAGE" bs=1M count=100 2>/dev/null
-mkfs.ext4 -q -m 0 "$IMAGE"
+mkfs.ext4 -q "$IMAGE"
 mount -o loop "$IMAGE" "$LOGS"
 if [ $? -ne 0 ]; then
     echo "Не удалось подключить тестовый раздел"
     exit 1
 fi
 
-DISK_KB=$(df -P -k "$LOGS" | tail -n 1 | tr -s ' ' | cut -d ' ' -f 2)
-
+df_line=$(df -P -k "$LOGS" | tail -n 1)
+used_kb=$(echo "$df_line" | tr -s ' ' | cut -d ' ' -f 3)
+free_kb=$(echo "$df_line" | tr -s ' ' | cut -d ' ' -f 4)
+DISK_KB=$((used_kb + free_kb))
 FILE_KB=$((DISK_KB / 100))
-
 FOLDER_LIMIT_KB=$((DISK_KB * 90 / 100 / 3))
 
 echo "Тестовый раздел: $DISK_KB КБ, один файл: $FILE_KB КБ, лимит папки: $FOLDER_LIMIT_KB КБ"
 echo
-
-# ---------- Вспомогательные функции ----------
-
 
 log_name() {
     component="$1"
@@ -60,20 +56,22 @@ log_name() {
     echo "${component}_${day}_${timestamp}.log"
 }
 
-
 make_logs() {
     component="$1"
     count="$2"
     size_kb="$3"
+    data_source="/dev/zero"
+    if [ -n "$4" ]; then
+        data_source="$4"
+    fi
     mkdir -p "$LOGS/$component"
     i=1
     while [ $i -le $count ]; do
         name=$(log_name "$component" $i)
-        dd if=/dev/zero of="$LOGS/$component/$name" bs=1K count="$size_kb" 2>/dev/null
+        dd if="$data_source" of="$LOGS/$component/$name" bs=1K count="$size_kb" 2>/dev/null
         i=$((i + 1))
     done
 }
-
 
 clean_disk() {
     rm -rf "$LOGS/$AUTH" "$LOGS/$DATA" "$LOGS/$SYSTEM" "$LOGS/other_data.bin"
@@ -183,8 +181,6 @@ finish_test() {
     echo
 }
 
-# ---------- Сценарии ----------
-
 start_test "раздел заполнен на 70%, ничего не трогаем (хотя auth больше 1/3)"
 make_logs $AUTH 50 $FILE_KB
 make_logs $DATA 10 $FILE_KB
@@ -252,6 +248,8 @@ run_script "$LOGS" abc
 expect_equal "код выхода для порога abc" "$exit_code" "1"
 run_script "$LOGS" 150
 expect_equal "код выхода для порога 150" "$exit_code" "1"
+run_script "$LOGS" 010
+expect_equal "код выхода для порога 010" "$exit_code" "1"
 run_script "$TEST_ROOT/no_such_folder" 90
 expect_equal "код выхода для несуществующей папки" "$exit_code" "1"
 check_untouched $AUTH 52
@@ -259,7 +257,25 @@ check_untouched $DATA 25
 check_untouched $SYSTEM 15
 finish_test
 
-# ---------- Итог и уборка ----------
+start_test "папка не смонтирована (обычная папка на системном диске): ошибка"
+mkdir -p "$TEST_ROOT/not_mounted/$AUTH"
+run_script "$TEST_ROOT/not_mounted" 90
+expect_equal "код выхода" "$exit_code" "1"
+expect_output "не смонтирован"
+rm -rf "$TEST_ROOT/not_mounted"
+finish_test
+
+start_test "92%, логи auth не сжимаются, архив не влезает: ничего не теряем, мусора нет"
+make_logs $AUTH 52 $FILE_KB /dev/urandom
+make_logs $DATA 25 $FILE_KB
+make_logs $SYSTEM 15 $FILE_KB
+run_script "$LOGS" 90
+expect_equal "код выхода" "$exit_code" "1"
+expect_output "ошибка tar"
+check_untouched $AUTH 52
+check_untouched $DATA 25
+check_untouched $SYSTEM 15
+finish_test
 
 umount "$LOGS"
 rm -rf "$TEST_ROOT"
