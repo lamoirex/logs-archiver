@@ -56,7 +56,6 @@ echo "*/5 * * * * root /usr/local/bin/archive_logs.sh >> /var/log/archive_logs.l
 ```
 sudo bash test_archive_logs.sh
 ```
-
 Тест сам создаёт раздел на 100 МБ (файл-образ с ext4), прогоняет 8 сценариев
 и за собой всё убирает. В конце строка "Пройдено тестов: 8 из 8".
 
